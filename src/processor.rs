@@ -102,6 +102,14 @@ impl Processor {
             return Err(ProgramError::MissingRequiredSignature);
         }
 
+        if campaign_account.owner != program_id {
+            return Err(ProgramError::IllegalOwner);
+        }
+
+        if system_program.key != &system_program::id() {
+            return Err(ProgramError::IncorrectProgramId);
+        }
+
         let clock = Clock::get()?;
 
         let mut campaign_data = Campaign::try_from_slice(&campaign_account.data.borrow())
@@ -160,8 +168,10 @@ impl Processor {
                 ]],
             )?;
         } else {
-            let record = Contribution::try_from_slice(&contribution_account.data.borrow())
-                .unwrap_or(Contribution { amount: 0 });
+            let record = match Contribution::try_from_slice(&contribution_account.data.borrow()) {
+                Ok(c) => c,
+                Err(_) => Contribution { amount: 0 },
+            };
             current_contribution = record.amount;
         }
 
@@ -196,6 +206,14 @@ impl Processor {
 
         if !creator_account.is_signer {
             return Err(ProgramError::MissingRequiredSignature);
+        }
+
+        if campaign_account.owner != program_id {
+            return Err(ProgramError::IllegalOwner);
+        }
+
+        if system_program.key != &system_program::id() {
+            return Err(ProgramError::IncorrectProgramId);
         }
 
         let mut campaign_data = Campaign::try_from_slice(&campaign_account.data.borrow())
@@ -253,6 +271,14 @@ impl Processor {
         let contribution_account = next_account_info(account_info_iter)?;
         let vault_account = next_account_info(account_info_iter)?;
         let system_program = next_account_info(account_info_iter)?;
+
+        if campaign_account.owner != program_id {
+            return Err(ProgramError::IllegalOwner);
+        }
+
+        if system_program.key != &system_program::id() {
+            return Err(ProgramError::IncorrectProgramId);
+        }
 
         let campaign_data = Campaign::try_from_slice(&campaign_account.data.borrow())
             .map_err(|_| ProgramError::InvalidAccountData)?;
