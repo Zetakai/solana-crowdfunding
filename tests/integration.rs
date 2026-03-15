@@ -1,5 +1,5 @@
 // Removed feature constraint
-use borsh::{BorshDeserialize, BorshSerialize};
+use borsh::BorshDeserialize;
 use solana_program::{
     instruction::{AccountMeta, Instruction},
     pubkey::Pubkey,
@@ -71,7 +71,7 @@ async fn setup_campaign(
 
 #[tokio::test]
 async fn test_create_campaign() {
-    let mut pt = program_test();
+    let pt = program_test();
     let mut context = pt.start_with_context().await;
 
     // Convert to Keypair matching
@@ -99,7 +99,7 @@ async fn test_create_campaign() {
 
 #[tokio::test]
 async fn test_contribute() {
-    let mut pt = program_test();
+    let pt = program_test();
     let mut context = pt.start_with_context().await;
     let payer = Keypair::from_bytes(&context.payer.to_bytes()).unwrap();
 
@@ -157,7 +157,7 @@ async fn test_contribute() {
 
 #[tokio::test]
 async fn test_withdraw() {
-    let mut pt = program_test();
+    let pt = program_test();
     let mut context = pt.start_with_context().await;
     let payer = Keypair::from_bytes(&context.payer.to_bytes()).unwrap();
 
@@ -256,7 +256,7 @@ async fn test_withdraw() {
 
 #[tokio::test]
 async fn test_refund() {
-    let mut pt = program_test();
+    let pt = program_test();
     let mut context = pt.start_with_context().await;
     let payer = Keypair::from_bytes(&context.payer.to_bytes()).unwrap();
 

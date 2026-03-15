@@ -1,4 +1,3 @@
-use borsh::BorshSerialize;
 use solana_client::rpc_client::RpcClient;
 use solana_crowdfunding::instruction::CrowdfundingInstruction;
 use solana_sdk::{
@@ -42,7 +41,7 @@ fn test_devnet() {
         .get_minimum_balance_for_rent_exemption(32 + 8 + 8 + 8 + 1)
         .unwrap();
 
-    let mut create_instrs = vec![
+    let create_instrs = vec![
         solana_sdk::system_instruction::create_account(
             &payer.pubkey(),
             &campaign.pubkey(),
@@ -135,7 +134,7 @@ fn test_devnet() {
     tx.sign(&[&payer], blockhash);
     match client.send_and_confirm_transaction(&tx) {
         Ok(sig) => println!("Early withdrawal succeeded (UNEXPECTED): {}", sig),
-        Err(e) => println!("Early withdrawal failed as expected!"),
+        Err(_e) => println!("Early withdrawal failed as expected!"),
     }
 
     // 5. Wait until after deadline
@@ -160,6 +159,6 @@ fn test_devnet() {
     tx.sign(&[&payer], blockhash);
     match client.send_and_confirm_transaction(&tx) {
         Ok(sig) => println!("Double withdrawal succeeded (UNEXPECTED): {}", sig),
-        Err(e) => println!("Double withdrawal failed as expected!"),
+        Err(_e) => println!("Double withdrawal failed as expected!"),
     }
 }

@@ -6,7 +6,7 @@ pub enum CrowdfundingInstruction {
     ///
     /// Accounts expected:
     /// 0. `[signer]` The creator of the campaign
-    /// 1. `[writable]` The campaign account (PDA)
+    /// 1. `[writable]` The campaign account
     /// 2. `[]` System Program
     CreateCampaign { goal: u64, deadline: i64 },
 
@@ -14,7 +14,7 @@ pub enum CrowdfundingInstruction {
     ///
     /// Accounts expected:
     /// 0. `[signer, writable]` Donor
-    /// 1. `[writable]` The campaign account (PDA)
+    /// 1. `[writable]` The campaign account
     /// 2. `[writable]` The donor's contribution record (PDA)
     /// 3. `[writable]` The campaign vault account (PDA)
     /// 4. `[]` System Program
@@ -24,7 +24,7 @@ pub enum CrowdfundingInstruction {
     ///
     /// Accounts expected:
     /// 0. `[signer, writable]` Creator
-    /// 1. `[writable]` The campaign account (PDA)
+    /// 1. `[writable]` The campaign account
     /// 2. `[writable]` The campaign vault account (PDA)
     /// 3. `[]` System Program
     Withdraw,
@@ -33,7 +33,7 @@ pub enum CrowdfundingInstruction {
     ///
     /// Accounts expected:
     /// 0. `[writable]` Donor account
-    /// 1. `[writable]` The campaign account (PDA)
+    /// 1. `[writable]` The campaign account
     /// 2. `[writable]` The donor's contribution record (PDA)
     /// 3. `[writable]` The campaign vault account (PDA)
     /// 4. `[]` System Program

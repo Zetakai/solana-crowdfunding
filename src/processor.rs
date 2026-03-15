@@ -48,6 +48,10 @@ impl Processor {
         let creator_account = next_account_info(account_info_iter)?;
         let campaign_account = next_account_info(account_info_iter)?;
 
+        if !campaign_account.is_writable {
+            return Err(ProgramError::InvalidAccountData);
+        }
+
         if !creator_account.is_signer {
             return Err(ProgramError::MissingRequiredSignature);
         }
@@ -64,8 +68,8 @@ impl Processor {
         let mut campaign_data = Campaign::try_from_slice(&campaign_account.data.borrow())
             .map_err(|_| ProgramError::InvalidAccountData)?;
 
-        // Ensure it's not already initialized by checking if the goal is 0
-        if campaign_data.goal != 0 {
+        // Ensure it's not already initialized by checking if the creator is valid
+        if campaign_data.creator != Pubkey::default() {
             return Err(ProgramError::AccountAlreadyInitialized);
         }
 
@@ -94,8 +98,20 @@ impl Processor {
         let vault_account = next_account_info(account_info_iter)?;
         let system_program = next_account_info(account_info_iter)?;
 
+        if !donor_account.is_writable
+            || !campaign_account.is_writable
+            || !contribution_account.is_writable
+            || !vault_account.is_writable
+        {
+            return Err(ProgramError::InvalidAccountData);
+        }
+
         if !donor_account.is_signer {
             return Err(ProgramError::MissingRequiredSignature);
+        }
+
+        if amount == 0 {
+            return Err(CrowdfundingError::InvalidAmount.into());
         }
 
         if campaign_account.owner != program_id {
@@ -141,20 +157,37 @@ impl Processor {
         if contribution_account.data_is_empty() {
             let space = 8; // u64 length for amount
             let rent_lamports = rent.minimum_balance(space);
+            let required_lamports = rent_lamports.saturating_sub(contribution_account.lamports());
+
+            if required_lamports > 0 {
+                invoke(
+                    &system_instruction::transfer(
+                        donor_account.key,
+                        contribution_account.key,
+                        required_lamports,
+                    ),
+                    &[
+                        donor_account.clone(),
+                        contribution_account.clone(),
+                        system_program.clone(),
+                    ],
+                )?;
+            }
 
             invoke_signed(
-                &system_instruction::create_account(
-                    donor_account.key,
-                    contribution_account.key,
-                    rent_lamports,
-                    space as u64,
-                    program_id,
-                ),
-                &[
-                    donor_account.clone(),
-                    contribution_account.clone(),
-                    system_program.clone(),
-                ],
+                &system_instruction::allocate(contribution_account.key, space as u64),
+                &[contribution_account.clone(), system_program.clone()],
+                &[&[
+                    b"contribution",
+                    campaign_account.key.as_ref(),
+                    donor_account.key.as_ref(),
+                    &[record_bump],
+                ]],
+            )?;
+
+            invoke_signed(
+                &system_instruction::assign(contribution_account.key, program_id),
+                &[contribution_account.clone(), system_program.clone()],
                 &[&[
                     b"contribution",
                     campaign_account.key.as_ref(),
@@ -210,6 +243,13 @@ impl Processor {
         let campaign_account = next_account_info(account_info_iter)?;
         let vault_account = next_account_info(account_info_iter)?;
         let system_program = next_account_info(account_info_iter)?;
+
+        if !creator_account.is_writable
+            || !campaign_account.is_writable
+            || !vault_account.is_writable
+        {
+            return Err(ProgramError::InvalidAccountData);
+        }
 
         if !creator_account.is_signer {
             return Err(ProgramError::MissingRequiredSignature);
@@ -278,6 +318,14 @@ impl Processor {
         let vault_account = next_account_info(account_info_iter)?;
         let system_program = next_account_info(account_info_iter)?;
 
+        if !donor_account.is_writable
+            || !campaign_account.is_writable
+            || !contribution_account.is_writable
+            || !vault_account.is_writable
+        {
+            return Err(ProgramError::InvalidAccountData);
+        }
+
         if campaign_account.owner != program_id {
             return Err(ProgramError::IllegalOwner);
         }
@@ -325,13 +373,21 @@ impl Processor {
             return Err(CrowdfundingError::InvalidPDA.into());
         }
 
+        let rent_minimum = Rent::get()?.minimum_balance(0);
+        let vault_balance = vault_account.lamports();
+        let mut refund_amount = amount;
+
+        if vault_balance.saturating_sub(refund_amount) < rent_minimum {
+            refund_amount = vault_balance;
+        }
+
         // Empty the contribution account record
         let new_record = Contribution { amount: 0 };
         new_record.serialize(&mut *contribution_account.data.borrow_mut())?;
 
         // Transfer SOL back
         invoke_signed(
-            &system_instruction::transfer(vault_account.key, donor_account.key, amount),
+            &system_instruction::transfer(vault_account.key, donor_account.key, refund_amount),
             &[
                 vault_account.clone(),
                 donor_account.clone(),
@@ -340,7 +396,7 @@ impl Processor {
             &[&[b"vault", campaign_account.key.as_ref(), &[_vault_bump]]],
         )?;
 
-        msg!("Refunded: {} lamports", amount);
+        msg!("Refunded: {} lamports", refund_amount);
 
         Ok(())
     }
