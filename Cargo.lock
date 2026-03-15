@@ -3935,6 +3935,7 @@ dependencies = [
  "solana-program",
  "solana-program-test",
  "solana-sdk",
+ "thiserror",
  "tokio",
 ]
 

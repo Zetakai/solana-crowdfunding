@@ -1,3 +1,4 @@
+use crate::error::CrowdfundingError;
 use crate::instruction::CrowdfundingInstruction;
 use crate::state::{Campaign, Contribution};
 use borsh::{BorshDeserialize, BorshSerialize};
@@ -10,8 +11,7 @@ use solana_program::{
     program_error::ProgramError,
     pubkey::Pubkey,
     rent::Rent,
-    system_instruction,
-    system_program,
+    system_instruction, system_program,
     sysvar::Sysvar,
 };
 
@@ -24,7 +24,7 @@ impl Processor {
         instruction_data: &[u8],
     ) -> ProgramResult {
         let instruction = CrowdfundingInstruction::try_from_slice(instruction_data)
-            .map_err(|_| ProgramError::InvalidInstructionData)?;
+            .map_err(|_| CrowdfundingError::InvalidInstruction)?;
 
         match instruction {
             CrowdfundingInstruction::CreateCampaign { goal, deadline } => {
@@ -33,12 +33,8 @@ impl Processor {
             CrowdfundingInstruction::Contribute { amount } => {
                 Self::process_contribute(program_id, accounts, amount)
             }
-            CrowdfundingInstruction::Withdraw => {
-                Self::process_withdraw(program_id, accounts)
-            }
-            CrowdfundingInstruction::Refund => {
-                Self::process_refund(program_id, accounts)
-            }
+            CrowdfundingInstruction::Withdraw => Self::process_withdraw(program_id, accounts),
+            CrowdfundingInstruction::Refund => Self::process_refund(program_id, accounts),
         }
     }
 
@@ -62,7 +58,7 @@ impl Processor {
 
         let clock = Clock::get()?;
         if deadline <= clock.unix_timestamp {
-            return Err(ProgramError::InvalidArgument); // deadline must be in future
+            return Err(CrowdfundingError::DeadlinePassed.into());
         }
 
         let mut campaign_data = Campaign::try_from_slice(&campaign_account.data.borrow())
@@ -116,16 +112,14 @@ impl Processor {
             .map_err(|_| ProgramError::InvalidAccountData)?;
 
         if clock.unix_timestamp >= campaign_data.deadline {
-            return Err(ProgramError::InvalidArgument); // campaign ended
+            return Err(CrowdfundingError::DeadlinePassed.into());
         }
 
         // Vault validation
-        let (vault_pda, bump) = Pubkey::find_program_address(
-            &[b"vault", campaign_account.key.as_ref()],
-            program_id,
-        );
+        let (vault_pda, _bump) =
+            Pubkey::find_program_address(&[b"vault", campaign_account.key.as_ref()], program_id);
         if vault_pda != *vault_account.key {
-            return Err(ProgramError::InvalidSeeds);
+            return Err(CrowdfundingError::InvalidPDA.into());
         }
 
         // Create or update contribution
@@ -135,14 +129,15 @@ impl Processor {
             campaign_account.key.as_ref(),
             donor_account.key.as_ref(),
         ];
-        let (contribution_pda, record_bump) = Pubkey::find_program_address(contribution_seeds, program_id);
+        let (contribution_pda, record_bump) =
+            Pubkey::find_program_address(contribution_seeds, program_id);
 
         if contribution_pda != *contribution_account.key {
-            return Err(ProgramError::InvalidSeeds);
+            return Err(CrowdfundingError::InvalidPDA.into());
         }
 
         let mut current_contribution = 0u64;
-        
+
         if contribution_account.data_is_empty() {
             let space = 8; // u64 length for amount
             let rent_lamports = rent.minimum_balance(space);
@@ -176,28 +171,40 @@ impl Processor {
         }
 
         // Save contribution amount
-        let new_contribution = current_contribution.checked_add(amount).ok_or(ProgramError::InvalidInstructionData)?;
-        let record = Contribution { amount: new_contribution };
+        let new_contribution = current_contribution
+            .checked_add(amount)
+            .ok_or(CrowdfundingError::ArithmeticOverflow)?;
+        let record = Contribution {
+            amount: new_contribution,
+        };
         record.serialize(&mut *contribution_account.data.borrow_mut())?;
 
         // Transfer funds to vault
         invoke(
             &system_instruction::transfer(donor_account.key, vault_account.key, amount),
-            &[donor_account.clone(), vault_account.clone(), system_program.clone()],
+            &[
+                donor_account.clone(),
+                vault_account.clone(),
+                system_program.clone(),
+            ],
         )?;
 
-        campaign_data.raised = campaign_data.raised.checked_add(amount).ok_or(ProgramError::InvalidInstructionData)?;
+        campaign_data.raised = campaign_data
+            .raised
+            .checked_add(amount)
+            .ok_or(CrowdfundingError::ArithmeticOverflow)?;
         campaign_data.serialize(&mut *campaign_account.data.borrow_mut())?;
 
-        msg!("Contributed: {} lamports, total={}", amount, campaign_data.raised);
+        msg!(
+            "Contributed: {} lamports, total={}",
+            amount,
+            campaign_data.raised
+        );
 
         Ok(())
     }
 
-    fn process_withdraw(
-        program_id: &Pubkey,
-        accounts: &[AccountInfo],
-    ) -> ProgramResult {
+    fn process_withdraw(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
         let account_info_iter = &mut accounts.iter();
         let creator_account = next_account_info(account_info_iter)?;
         let campaign_account = next_account_info(account_info_iter)?;
@@ -224,32 +231,34 @@ impl Processor {
         }
 
         if campaign_data.claimed {
-            return Err(ProgramError::InvalidArgument);
+            return Err(CrowdfundingError::AlreadyClaimed.into());
         }
 
         let clock = Clock::get()?;
         if clock.unix_timestamp < campaign_data.deadline {
-            return Err(ProgramError::InvalidArgument); // too early
+            return Err(CrowdfundingError::DeadlineNotReached.into());
         }
 
         if campaign_data.raised < campaign_data.goal {
-            return Err(ProgramError::InvalidArgument); // goal not met
+            return Err(CrowdfundingError::GoalNotMet.into());
         }
 
-        let (vault_pda, bump) = Pubkey::find_program_address(
-            &[b"vault", campaign_account.key.as_ref()],
-            program_id,
-        );
+        let (vault_pda, bump) =
+            Pubkey::find_program_address(&[b"vault", campaign_account.key.as_ref()], program_id);
 
         if vault_pda != *vault_account.key {
-            return Err(ProgramError::InvalidSeeds);
+            return Err(CrowdfundingError::InvalidPDA.into());
         }
 
         let amount = vault_account.lamports();
-        
+
         invoke_signed(
             &system_instruction::transfer(vault_account.key, creator_account.key, amount),
-            &[vault_account.clone(), creator_account.clone(), system_program.clone()],
+            &[
+                vault_account.clone(),
+                creator_account.clone(),
+                system_program.clone(),
+            ],
             &[&[b"vault", campaign_account.key.as_ref(), &[bump]]],
         )?;
 
@@ -261,10 +270,7 @@ impl Processor {
         Ok(())
     }
 
-    fn process_refund(
-        program_id: &Pubkey,
-        accounts: &[AccountInfo],
-    ) -> ProgramResult {
+    fn process_refund(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
         let account_info_iter = &mut accounts.iter();
         let donor_account = next_account_info(account_info_iter)?;
         let campaign_account = next_account_info(account_info_iter)?;
@@ -285,11 +291,11 @@ impl Processor {
 
         let clock = Clock::get()?;
         if clock.unix_timestamp < campaign_data.deadline {
-            return Err(ProgramError::InvalidArgument); // too early
+            return Err(CrowdfundingError::DeadlineNotReached.into());
         }
 
         if campaign_data.raised >= campaign_data.goal {
-            return Err(ProgramError::InvalidArgument); // goal met, can't refund
+            return Err(CrowdfundingError::GoalMet.into());
         }
 
         let contribution_seeds = &[
@@ -297,10 +303,11 @@ impl Processor {
             campaign_account.key.as_ref(),
             donor_account.key.as_ref(),
         ];
-        let (contribution_pda, _bump) = Pubkey::find_program_address(contribution_seeds, program_id);
+        let (contribution_pda, _bump) =
+            Pubkey::find_program_address(contribution_seeds, program_id);
 
         if contribution_pda != *contribution_account.key {
-            return Err(ProgramError::InvalidSeeds);
+            return Err(CrowdfundingError::InvalidPDA.into());
         }
 
         let record = Contribution::try_from_slice(&contribution_account.data.borrow())
@@ -308,16 +315,14 @@ impl Processor {
 
         let amount = record.amount;
         if amount == 0 {
-            return Err(ProgramError::InvalidArgument); // nothing to refund
+            return Err(CrowdfundingError::InvalidAmount.into());
         }
 
-        let (vault_pda, _vault_bump) = Pubkey::find_program_address(
-            &[b"vault", campaign_account.key.as_ref()],
-            program_id,
-        );
+        let (vault_pda, _vault_bump) =
+            Pubkey::find_program_address(&[b"vault", campaign_account.key.as_ref()], program_id);
 
         if vault_pda != *vault_account.key {
-            return Err(ProgramError::InvalidSeeds);
+            return Err(CrowdfundingError::InvalidPDA.into());
         }
 
         // Empty the contribution account record
@@ -327,7 +332,11 @@ impl Processor {
         // Transfer SOL back
         invoke_signed(
             &system_instruction::transfer(vault_account.key, donor_account.key, amount),
-            &[vault_account.clone(), donor_account.clone(), system_program.clone()],
+            &[
+                vault_account.clone(),
+                donor_account.clone(),
+                system_program.clone(),
+            ],
             &[&[b"vault", campaign_account.key.as_ref(), &[_vault_bump]]],
         )?;
 

@@ -12,9 +12,7 @@ use solana_sdk::{
 };
 
 use solana_crowdfunding::{
-    instruction::CrowdfundingInstruction,
-    processor::Processor,
-    state::Campaign,
+    instruction::CrowdfundingInstruction, processor::Processor, state::Campaign,
 };
 
 fn program_id() -> Pubkey {
@@ -55,15 +53,18 @@ async fn setup_campaign(
             AccountMeta::new(payer.pubkey(), true),
             AccountMeta::new(campaign_keypair.pubkey(), false),
         ],
-        data: borsh::to_vec(&CrowdfundingInstruction::CreateCampaign { goal, deadline })
-            .unwrap(),
+        data: borsh::to_vec(&CrowdfundingInstruction::CreateCampaign { goal, deadline }).unwrap(),
     };
     instructions.push(create_instr);
 
     let mut transaction = Transaction::new_with_payer(&instructions, Some(&payer.pubkey()));
     transaction.sign(&[payer, &campaign_keypair], context.last_blockhash);
 
-    context.banks_client.process_transaction(transaction).await.unwrap();
+    context
+        .banks_client
+        .process_transaction(transaction)
+        .await
+        .unwrap();
 
     campaign_keypair
 }
@@ -72,7 +73,7 @@ async fn setup_campaign(
 async fn test_create_campaign() {
     let mut pt = program_test();
     let mut context = pt.start_with_context().await;
-    
+
     // Convert to Keypair matching
     let payer = Keypair::from_bytes(&context.payer.to_bytes()).unwrap();
 
@@ -108,10 +109,8 @@ async fn test_contribute() {
 
     let program_id = program_id();
 
-    let (vault_pda, _bump) = Pubkey::find_program_address(
-        &[b"vault", campaign_keypair.pubkey().as_ref()],
-        &program_id,
-    );
+    let (vault_pda, _bump) =
+        Pubkey::find_program_address(&[b"vault", campaign_keypair.pubkey().as_ref()], &program_id);
 
     let (contribution_pda, _bump) = Pubkey::find_program_address(
         &[
@@ -133,14 +132,17 @@ async fn test_contribute() {
             AccountMeta::new(vault_pda, false),
             AccountMeta::new_readonly(system_program::id(), false),
         ],
-        data: borsh::to_vec(&CrowdfundingInstruction::Contribute { amount })
-            .unwrap(),
+        data: borsh::to_vec(&CrowdfundingInstruction::Contribute { amount }).unwrap(),
     };
 
     let mut transaction = Transaction::new_with_payer(&[contribute_instr], Some(&payer.pubkey()));
     transaction.sign(&[&payer], context.last_blockhash);
 
-    context.banks_client.process_transaction(transaction).await.unwrap();
+    context
+        .banks_client
+        .process_transaction(transaction)
+        .await
+        .unwrap();
 
     let campaign_account = context
         .banks_client
@@ -161,9 +163,13 @@ async fn test_withdraw() {
 
     let goal = 1000 * 1_000_000_000;
     let deadline = 500;
-    
+
     // Set clock before setup_campaign
-    let mut clock = context.banks_client.get_sysvar::<solana_program::clock::Clock>().await.unwrap();
+    let mut clock = context
+        .banks_client
+        .get_sysvar::<solana_program::clock::Clock>()
+        .await
+        .unwrap();
     clock.unix_timestamp = 100; // Before the deadline
     context.set_sysvar(&clock);
 
@@ -171,10 +177,8 @@ async fn test_withdraw() {
 
     let program_id = program_id();
 
-    let (vault_pda, _bump) = Pubkey::find_program_address(
-        &[b"vault", campaign_keypair.pubkey().as_ref()],
-        &program_id,
-    );
+    let (vault_pda, _bump) =
+        Pubkey::find_program_address(&[b"vault", campaign_keypair.pubkey().as_ref()], &program_id);
     let (contribution_pda, _bump) = Pubkey::find_program_address(
         &[
             b"contribution",
@@ -201,10 +205,18 @@ async fn test_withdraw() {
     let mut transaction = Transaction::new_with_payer(&[contribute_instr], Some(&payer.pubkey()));
     transaction.sign(&[&payer], context.last_blockhash);
 
-    context.banks_client.process_transaction(transaction).await.unwrap();
+    context
+        .banks_client
+        .process_transaction(transaction)
+        .await
+        .unwrap();
 
     // To withdraw, we need to artificially advance the clock so deadline is passed
-    let mut clock = context.banks_client.get_sysvar::<solana_program::clock::Clock>().await.unwrap();
+    let mut clock = context
+        .banks_client
+        .get_sysvar::<solana_program::clock::Clock>()
+        .await
+        .unwrap();
     clock.unix_timestamp = 1000; // Past the deadline
     context.set_sysvar(&clock);
 
@@ -225,7 +237,11 @@ async fn test_withdraw() {
     let mut transaction = Transaction::new_with_payer(&[withdraw_instr], Some(&payer.pubkey()));
     transaction.sign(&[&payer], recent_blockhash);
 
-    context.banks_client.process_transaction(transaction).await.unwrap();
+    context
+        .banks_client
+        .process_transaction(transaction)
+        .await
+        .unwrap();
 
     let campaign_account = context
         .banks_client
@@ -246,9 +262,13 @@ async fn test_refund() {
 
     let goal = 1000 * 1_000_000_000;
     let deadline = 500;
-    
+
     // Set clock before setup_campaign
-    let mut clock = context.banks_client.get_sysvar::<solana_program::clock::Clock>().await.unwrap();
+    let mut clock = context
+        .banks_client
+        .get_sysvar::<solana_program::clock::Clock>()
+        .await
+        .unwrap();
     clock.unix_timestamp = 100; // Before the deadline
     context.set_sysvar(&clock);
 
@@ -256,10 +276,8 @@ async fn test_refund() {
 
     let program_id = program_id();
 
-    let (vault_pda, _bump) = Pubkey::find_program_address(
-        &[b"vault", campaign_keypair.pubkey().as_ref()],
-        &program_id,
-    );
+    let (vault_pda, _bump) =
+        Pubkey::find_program_address(&[b"vault", campaign_keypair.pubkey().as_ref()], &program_id);
     let (contribution_pda, _bump) = Pubkey::find_program_address(
         &[
             b"contribution",
@@ -286,7 +304,11 @@ async fn test_refund() {
     let mut transaction = Transaction::new_with_payer(&[contribute_instr], Some(&payer.pubkey()));
     transaction.sign(&[&payer], context.last_blockhash);
 
-    context.banks_client.process_transaction(transaction).await.unwrap();
+    context
+        .banks_client
+        .process_transaction(transaction)
+        .await
+        .unwrap();
 
     // Fast-forward past deadline
     clock.unix_timestamp = 1000; // Past the deadline
@@ -309,14 +331,14 @@ async fn test_refund() {
     let mut transaction = Transaction::new_with_payer(&[refund_instr], Some(&payer.pubkey()));
     transaction.sign(&[&payer], recent_blockhash);
 
-    context.banks_client.process_transaction(transaction).await.unwrap();
-
-    // Verify refund (vault should be 0 since payer was the only donor, so the account is deleted)
-    let vault_account = context
+    context
         .banks_client
-        .get_account(vault_pda)
+        .process_transaction(transaction)
         .await
         .unwrap();
+
+    // Verify refund (vault should be 0 since payer was the only donor, so the account is deleted)
+    let vault_account = context.banks_client.get_account(vault_pda).await.unwrap();
 
     assert!(vault_account.is_none());
 }
