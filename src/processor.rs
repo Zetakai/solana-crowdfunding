@@ -60,6 +60,12 @@ impl Processor {
             return Err(ProgramError::IncorrectProgramId);
         }
 
+        // Ensure the campaign account is rent-exempt to prevent network purging
+        let rent = Rent::get()?;
+        if !rent.is_exempt(campaign_account.lamports(), campaign_account.data_len()) {
+            return Err(ProgramError::AccountNotRentExempt);
+        }
+
         let clock = Clock::get()?;
         if deadline <= clock.unix_timestamp {
             return Err(CrowdfundingError::DeadlinePassed.into());
@@ -359,6 +365,11 @@ impl Processor {
             return Err(CrowdfundingError::InvalidPDA.into());
         }
 
+        // Verify the contribution account is owned by this program
+        if contribution_account.owner != program_id {
+            return Err(ProgramError::IllegalOwner);
+        }
+
         let record = Contribution::try_from_slice(&contribution_account.data.borrow())
             .map_err(|_| ProgramError::InvalidAccountData)?;
 
@@ -374,17 +385,10 @@ impl Processor {
             return Err(CrowdfundingError::InvalidPDA.into());
         }
 
-        let rent_minimum = Rent::get()?.minimum_balance(0);
-        let vault_balance = vault_account.lamports();
-        let mut refund_amount = amount;
-
-        if vault_balance.saturating_sub(refund_amount) < rent_minimum {
-            refund_amount = vault_balance;
-        }
-
-        // Transfer contributed SOL back from vault to donor first (via CPI)
+        // Always refund the exact contributed amount — never drain the vault
+        // to avoid stealing from other donors who haven't yet refunded.
         invoke_signed(
-            &system_instruction::transfer(vault_account.key, donor_account.key, refund_amount),
+            &system_instruction::transfer(vault_account.key, donor_account.key, amount),
             &[
                 vault_account.clone(),
                 donor_account.clone(),
@@ -393,8 +397,8 @@ impl Processor {
             &[&[b"vault", campaign_account.key.as_ref(), &[_vault_bump]]],
         )?;
 
-        // Close the contribution account: zero data and transfer all rent lamports back to donor.
-        // This must happen AFTER the CPI to keep lamport balance invariant satisfied.
+        // Close the contribution account cleanly: zero its data and return rent to donor.
+        // This must happen AFTER the CPI to preserve the lamport balance invariant.
         {
             let mut data = contribution_account.data.borrow_mut();
             for byte in data.iter_mut() {
@@ -405,7 +409,7 @@ impl Processor {
         **contribution_account.try_borrow_mut_lamports()? -= contribution_rent;
         **donor_account.try_borrow_mut_lamports()? += contribution_rent;
 
-        msg!("Refunded: {} lamports + {} rent", refund_amount, contribution_rent);
+        msg!("Refunded: {} lamports + {} rent returned", amount, contribution_rent);
 
         Ok(())
     }
