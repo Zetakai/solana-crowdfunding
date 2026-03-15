@@ -37,13 +37,13 @@ async fn setup_campaign(
     let campaign_keypair = Keypair::new();
 
     let rent = context.banks_client.get_rent().await.unwrap();
-    let campaign_rent = rent.minimum_balance(32 + 8 + 8 + 8 + 1);
+    let campaign_rent = rent.minimum_balance(1 + 32 + 8 + 8 + 8 + 1);
 
     let mut instructions = vec![solana_sdk::system_instruction::create_account(
         &payer.pubkey(),
         &campaign_keypair.pubkey(),
         campaign_rent,
-        (32 + 8 + 8 + 8 + 1) as u64,
+        (1 + 32 + 8 + 8 + 8 + 1) as u64,
         &program_id,
     )];
 

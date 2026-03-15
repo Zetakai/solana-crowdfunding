@@ -38,7 +38,7 @@ fn test_devnet() {
         + 20;
 
     let campaign_rent = client
-        .get_minimum_balance_for_rent_exemption(32 + 8 + 8 + 8 + 1)
+        .get_minimum_balance_for_rent_exemption(1 + 32 + 8 + 8 + 8 + 1)
         .unwrap();
 
     let create_instrs = vec![
@@ -46,7 +46,7 @@ fn test_devnet() {
             &payer.pubkey(),
             &campaign.pubkey(),
             campaign_rent,
-            (32 + 8 + 8 + 8 + 1) as u64,
+            (1 + 32 + 8 + 8 + 8 + 1) as u64,
             &program_id,
         ),
         Instruction {

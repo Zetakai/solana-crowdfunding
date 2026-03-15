@@ -4,6 +4,8 @@ use solana_program::pubkey::Pubkey;
 /// State of a Crowdfunding Campaign
 #[derive(BorshSerialize, BorshDeserialize, Debug)]
 pub struct Campaign {
+    /// Whether this account has been initialized
+    pub is_initialized: bool,
     pub creator: Pubkey,
     pub goal: u64,
     pub raised: u64,

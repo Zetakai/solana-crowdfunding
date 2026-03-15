@@ -68,11 +68,12 @@ impl Processor {
         let mut campaign_data = Campaign::try_from_slice(&campaign_account.data.borrow())
             .map_err(|_| ProgramError::InvalidAccountData)?;
 
-        // Ensure it's not already initialized by checking if the creator is valid
-        if campaign_data.creator != Pubkey::default() {
+        // Prevent re-initialization using a dedicated flag (safe even for goal=0 campaigns)
+        if campaign_data.is_initialized {
             return Err(ProgramError::AccountAlreadyInitialized);
         }
 
+        campaign_data.is_initialized = true;
         campaign_data.creator = *creator_account.key;
         campaign_data.goal = goal;
         campaign_data.raised = 0;
@@ -381,11 +382,7 @@ impl Processor {
             refund_amount = vault_balance;
         }
 
-        // Empty the contribution account record
-        let new_record = Contribution { amount: 0 };
-        new_record.serialize(&mut *contribution_account.data.borrow_mut())?;
-
-        // Transfer SOL back
+        // Transfer contributed SOL back from vault to donor first (via CPI)
         invoke_signed(
             &system_instruction::transfer(vault_account.key, donor_account.key, refund_amount),
             &[
@@ -396,7 +393,19 @@ impl Processor {
             &[&[b"vault", campaign_account.key.as_ref(), &[_vault_bump]]],
         )?;
 
-        msg!("Refunded: {} lamports", refund_amount);
+        // Close the contribution account: zero data and transfer all rent lamports back to donor.
+        // This must happen AFTER the CPI to keep lamport balance invariant satisfied.
+        {
+            let mut data = contribution_account.data.borrow_mut();
+            for byte in data.iter_mut() {
+                *byte = 0;
+            }
+        }
+        let contribution_rent = contribution_account.lamports();
+        **contribution_account.try_borrow_mut_lamports()? -= contribution_rent;
+        **donor_account.try_borrow_mut_lamports()? += contribution_rent;
+
+        msg!("Refunded: {} lamports + {} rent", refund_amount, contribution_rent);
 
         Ok(())
     }
