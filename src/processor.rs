@@ -171,26 +171,10 @@ impl Processor {
         record.serialize(&mut *contribution_account.data.borrow_mut())?;
 
         // Transfer funds to vault
-        if vault_account.lamports() == 0 {
-            // Allocate space and transfer simultaneously to initialize PDA ownership
-            invoke_signed(
-                &system_instruction::create_account(
-                    donor_account.key,
-                    vault_account.key,
-                    amount,
-                    0,
-                    program_id,
-                ),
-                &[donor_account.clone(), vault_account.clone(), system_program.clone()],
-                &[&[b"vault", campaign_account.key.as_ref(), &[bump]]],
-            )?;
-        } else {
-            // Vault already exists, just transfer
-            invoke(
-                &system_instruction::transfer(donor_account.key, vault_account.key, amount),
-                &[donor_account.clone(), vault_account.clone(), system_program.clone()],
-            )?;
-        }
+        invoke(
+            &system_instruction::transfer(donor_account.key, vault_account.key, amount),
+            &[donor_account.clone(), vault_account.clone(), system_program.clone()],
+        )?;
 
         campaign_data.raised = campaign_data.raised.checked_add(amount).ok_or(ProgramError::InvalidInstructionData)?;
         campaign_data.serialize(&mut *campaign_account.data.borrow_mut())?;
@@ -208,6 +192,7 @@ impl Processor {
         let creator_account = next_account_info(account_info_iter)?;
         let campaign_account = next_account_info(account_info_iter)?;
         let vault_account = next_account_info(account_info_iter)?;
+        let system_program = next_account_info(account_info_iter)?;
 
         if !creator_account.is_signer {
             return Err(ProgramError::MissingRequiredSignature);
@@ -244,9 +229,11 @@ impl Processor {
 
         let amount = vault_account.lamports();
         
-        // Transfer all SOL from vault to creator by modifying lamports directly
-        **vault_account.try_borrow_mut_lamports()? = 0;
-        **creator_account.try_borrow_mut_lamports()? = creator_account.lamports().checked_add(amount).ok_or(ProgramError::InvalidArgument)?;
+        invoke_signed(
+            &system_instruction::transfer(vault_account.key, creator_account.key, amount),
+            &[vault_account.clone(), creator_account.clone(), system_program.clone()],
+            &[&[b"vault", campaign_account.key.as_ref(), &[bump]]],
+        )?;
 
         campaign_data.claimed = true;
         campaign_data.serialize(&mut *campaign_account.data.borrow_mut())?;
@@ -265,6 +252,7 @@ impl Processor {
         let campaign_account = next_account_info(account_info_iter)?;
         let contribution_account = next_account_info(account_info_iter)?;
         let vault_account = next_account_info(account_info_iter)?;
+        let system_program = next_account_info(account_info_iter)?;
 
         let campaign_data = Campaign::try_from_slice(&campaign_account.data.borrow())
             .map_err(|_| ProgramError::InvalidAccountData)?;
@@ -311,8 +299,11 @@ impl Processor {
         new_record.serialize(&mut *contribution_account.data.borrow_mut())?;
 
         // Transfer SOL back
-        **vault_account.try_borrow_mut_lamports()? = vault_account.lamports().checked_sub(amount).ok_or(ProgramError::InvalidArgument)?;
-        **donor_account.try_borrow_mut_lamports()? = donor_account.lamports().checked_add(amount).ok_or(ProgramError::InvalidArgument)?;
+        invoke_signed(
+            &system_instruction::transfer(vault_account.key, donor_account.key, amount),
+            &[vault_account.clone(), donor_account.clone(), system_program.clone()],
+            &[&[b"vault", campaign_account.key.as_ref(), &[_vault_bump]]],
+        )?;
 
         msg!("Refunded: {} lamports", amount);
 
